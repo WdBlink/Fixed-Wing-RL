@@ -43,3 +43,6 @@ max_altitude: 20000
 min_altitude: 19000
 max_vt: 1200
 min_vt: 1000
+origin_lat: 34.000000   # 度（纬度，北纬为正）
+origin_lon: 108.000000  # 度（经度，东经为正）
+origin_alt: 0       # 米（海拔高度，ASL）

@@ -1,6 +1,6 @@
 import sys
 import os
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))

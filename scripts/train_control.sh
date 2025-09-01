@@ -5,7 +5,7 @@ model='F16'
 algo="ppo"
 exp="v1"
 seed=0
-device="cuda:1"
+device="cuda:0"
 
 echo "env is ${env}, scenario is ${scenario}, model is ${model}, algo is ${algo}, exp is ${exp}, seed is ${seed}"
 python train/train_F16sim.py \

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import gym.spaces
+import gymnasium.spaces
 from .mlp import MLPLayer
 from .distributions import BetaShootBernoulli, Categorical, DiagGaussian, Bernoulli
 
@@ -19,26 +19,26 @@ class ACTLayer(nn.Module):
             self.mlp = MLPLayer(input_dim, hidden_size, activation_id)
             input_dim = self.mlp.output_size
 
-        if isinstance(act_space, gym.spaces.Discrete):
+        if isinstance(act_space, gymnasium.spaces.Discrete):
             action_dim = act_space.n
             self.action_out = Categorical(input_dim, action_dim, gain)
-        elif isinstance(act_space, gym.spaces.Box):
+        elif isinstance(act_space, gymnasium.spaces.Box):
             self._continuous_action = True
             action_dim = act_space.shape[0]
             self.action_out = DiagGaussian(input_dim, action_dim, gain)
-        elif isinstance(act_space, gym.spaces.MultiBinary):
+        elif isinstance(act_space, gymnasium.spaces.MultiBinary):
             action_dim = act_space.shape[0]
             self.action_out = Bernoulli(input_dim, action_dim, gain)
-        elif isinstance(act_space, gym.spaces.MultiDiscrete):
+        elif isinstance(act_space, gymnasium.spaces.MultiDiscrete):
             self._multidiscrete_action = True
             action_dims = act_space.nvec
             action_outs = []
             for action_dim in action_dims:
                 action_outs.append(Categorical(input_dim, action_dim, gain))
             self.action_outs = nn.ModuleList(action_outs)
-        elif isinstance(act_space, gym.spaces.Tuple) and  \
-              isinstance(act_space[0], gym.spaces.MultiDiscrete) and \
-                  isinstance(act_space[1], gym.spaces.Discrete):
+        elif isinstance(act_space, gymnasium.spaces.Tuple) and  \
+              isinstance(act_space[0], gymnasium.spaces.MultiDiscrete) and \
+                  isinstance(act_space[1], gymnasium.spaces.Discrete):
             # NOTE: only for shoot missile
             self._shoot_action = True
             discrete_dims = act_space[0].nvec

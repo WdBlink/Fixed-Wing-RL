@@ -2,7 +2,7 @@ import os
 import yaml
 import copy
 import math
-import gym.spaces
+import gymnasium.spaces
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,15 +14,15 @@ def check(input):
 
 
 def get_shape_from_space(space):
-    if isinstance(space, gym.spaces.Discrete):
+    if isinstance(space, gymnasium.spaces.Discrete):
         return (1,)
-    elif isinstance(space, gym.spaces.Box) \
-            or isinstance(space, gym.spaces.MultiDiscrete) \
-            or isinstance(space, gym.spaces.MultiBinary):
+    elif isinstance(space, gymnasium.spaces.Box) \
+            or isinstance(space, gymnasium.spaces.MultiDiscrete) \
+            or isinstance(space, gymnasium.spaces.MultiBinary):
         return space.shape
-    elif isinstance(space,gym.spaces.Tuple) and \
-           isinstance(space[0], gym.spaces.MultiDiscrete) and \
-               isinstance(space[1], gym.spaces.Discrete):
+    elif isinstance(space,gymnasium.spaces.Tuple) and \
+           isinstance(space[0], gymnasium.spaces.MultiDiscrete) and \
+               isinstance(space[1], gymnasium.spaces.Discrete):
         return (space[0].shape[0] + 1,)
     else:
         raise NotImplementedError(f"Unsupported action space type: {type(space)}!")

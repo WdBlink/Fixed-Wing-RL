@@ -7,7 +7,7 @@ import torch
 
 class LowSpeed(BaseTerminationCondition):
     """
-    HighSpeed
+    LowSpeed
     End up the simulation if speed are too low.
     """
 

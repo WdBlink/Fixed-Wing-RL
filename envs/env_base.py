@@ -3,7 +3,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 import numpy as np
 import torch
-import gym
+import gymnasium as gym
 import random
 from models.model_base import BaseModel
 from tasks.task_base import BaseTask
@@ -24,6 +24,16 @@ class BaseEnv(gym.Env):
         self.num_agents = getattr(self.config, 'num_agents', 100)
         self.n = self.num_agents * self.num_envs
         self.device = torch.device(device)
+
+        # 新增：从配置读取地理参考原点（用于 ENU <-> 经纬高 转换）
+        # 说明：
+        # - origin_lat: 参考纬度（度）
+        # - origin_lon: 参考经度（度）
+        # - origin_alt: 参考海拔（米，ASL）
+        # 注意：内部状态 s 的位置/高度单位为英尺，render 中已转换为米再传入地理转换函数。
+        self.origin_lat = getattr(self.config, 'origin_lat', 0.0)
+        self.origin_lon = getattr(self.config, 'origin_lon', 0.0)
+        self.origin_alt = getattr(self.config, 'origin_alt', 0.0)
 
         self.load(random_seed, config, model)
 
@@ -133,13 +143,22 @@ class BaseEnv(gym.Env):
             for i in range(self.n):
                 npos, epos, alt = self.model.get_position()
                 roll, pitch, yaw = self.model.get_posture()
+                # ENU 入参单位为米，这里将内部英尺制转换为米
                 npos = _t2n(npos) * 0.3048
                 epos = _t2n(epos) * 0.3048
                 alt = _t2n(alt) * 0.3048
                 roll = _t2n(roll)[0] * 180 / np.pi
                 pitch = _t2n(pitch)[0] * 180 / np.pi
                 yaw = _t2n(yaw)[0] * 180 / np.pi
-                lat, lon, alt = enu_to_geodetic(epos, npos, alt, 0, 0, 0)
+
+                # 修改点：使用配置的地理原点将 ENU 转为经纬高
+                # 注意：enu_to_geodetic 的入参顺序为 (xEast, yNorth, zUp, lat_ref, lon_ref, h_ref)
+                # 其中 lat_ref/lon_ref 单位为度，h_ref 单位为米
+                lat, lon, alt = enu_to_geodetic(
+                    epos, npos, alt,
+                    self.origin_lat, self.origin_lon, self.origin_alt
+                )
+
                 log_msg = f"{100 + i},T={lon}|{lat}|{alt}|{roll}|{pitch}|{yaw},"
                 log_msg += f"Name=F16,"
                 log_msg += f"Color=Red"

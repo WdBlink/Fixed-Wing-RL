@@ -1,15 +1,15 @@
-import gym.spaces
+import gymnasium.spaces
 import numpy as np
 from collections import OrderedDict
 
 
 def build_flattener(space):
-    if isinstance(space, gym.spaces.Dict):
+    if isinstance(space, gymnasium.spaces.Dict):
         return DictFlattener(space)
-    elif isinstance(space, gym.spaces.Box) \
-            or isinstance(space, gym.spaces.MultiDiscrete):
+    elif isinstance(space, gymnasium.spaces.Box) \
+            or isinstance(space, gymnasium.spaces.MultiDiscrete):
         return BoxFlattener(space)
-    elif isinstance(space, gym.spaces.Discrete):
+    elif isinstance(space, gymnasium.spaces.Discrete):
         return DiscreteFlattener(space)
     else:
         raise NotImplementedError
@@ -21,15 +21,15 @@ class DictFlattener():
 
     def __init__(self, ori_space):
         self.space = ori_space
-        assert isinstance(ori_space, gym.spaces.Dict)
+        assert isinstance(ori_space, gymnasium.spaces.Dict)
         self.size = 0
         self.flatteners = OrderedDict()
         for name, space in self.space.spaces.items():
-            if isinstance(space, gym.spaces.Box):
+            if isinstance(space, gymnasium.spaces.Box):
                 flattener = BoxFlattener(space)
-            elif isinstance(space, gym.spaces.Discrete):
+            elif isinstance(space, gymnasium.spaces.Discrete):
                 flattener = DiscreteFlattener(space)
-            elif isinstance(space, gym.spaces.Dict):
+            elif isinstance(space, gymnasium.spaces.Dict):
                 flattener = DictFlattener(space)
             self.flatteners[name] = flattener
             self.size += flattener.size
@@ -78,9 +78,9 @@ class BoxFlattener():
 
     def __init__(self, ori_space):
         self.space = ori_space
-        assert isinstance(ori_space, gym.spaces.Box) \
-            or isinstance(ori_space, gym.spaces.MultiDiscrete)
-        self.size = np.product(ori_space.shape)
+        assert isinstance(ori_space, gymnasium.spaces.Box) \
+            or isinstance(ori_space, gymnasium.spaces.MultiDiscrete)
+        self.size = np.prod(ori_space.shape)
 
     def __call__(self, observation):
         array = np.array(observation, copy=False)
@@ -106,7 +106,7 @@ class DiscreteFlattener():
 
     def __init__(self, ori_space):
         self.space = ori_space
-        assert isinstance(ori_space, gym.spaces.Discrete)
+        assert isinstance(ori_space, gymnasium.spaces.Discrete)
         self.size = 1
 
     def __call__(self, observation):

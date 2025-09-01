@@ -1,7 +1,7 @@
 import torch
 import random
 import numpy as np
-import gym
+import gymnasium as gym
 from abc import ABC, abstractmethod
 
 
