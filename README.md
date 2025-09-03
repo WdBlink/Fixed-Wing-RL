@@ -1,4 +1,7 @@
 # NeuralPlane: An Efficiently Parallelizable Platform for Fixed-wing Aircraft Control with Reinforcement Learning (NeurIPS 2024)
+
+本项目基于 NeuralPlane 与 DiffPhysDrone 项目进行二次开发与适配，部分代码与思路来源于上述项目，在此向原作者致谢。
+
 ## Introduction
 We introduce NeuralPlane, the first benchmark platform for large-scale parallel simulations of fixed-wing aircraft. NeuralPlane significantly boosts high-fidelity simulation via GPU-accelerated Flight Dynamics Model (FDM) computation, achieving a single-step simulation time of just 0.2 seconds at a parallel scale of $10^6$ aircraft, far exceeding current platforms. We also provide clear code templates, comprehensive evaluation and visualization tools, and hierarchical frameworks for integrating RL and traditional control methods. We believe that NeuralPlane can accelerate the development of RL-based fixed-wing flight control and serve as a new challenging benchmark for the RL community.
 
@@ -90,6 +93,10 @@ cd renders
 python render_*.py
 ```
 This will generate a `*.acmi` file. We can use [**TacView**](https://www.tacview.net/), a universal flight analysis tool, to open the file and watch the render videos.
+
+## Acknowledgements
+- NeuralPlane
+- [DiffPhysDrone](DiffPhysDrone/)
 
 <!-- ## Citing
 If you find this repo useful, pleased use the following citation:
