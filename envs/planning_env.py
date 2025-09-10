@@ -11,6 +11,7 @@ from tasks.tracking_task import TrackingTask
 from utils.utils import wrap_PI
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from algorithms.ppo.ppo_actor import PPOActor
+from algorithms.pid.controller import Controller
 
 CURRENT_WORK_PATH = os.getcwd()
 ego_run_dir = CURRENT_WORK_PATH + "/../scripts/runs/2024-05-26_02-14-24_Control_control_ppo_v1/episode_249"
@@ -32,16 +33,24 @@ class PlanningEnv(BaseEnv):
     """
     PlanningEnv is a fly-planning env for single agent to do tracking task.
     """
-    def __init__(self, num_envs=1, config='tracking', model='F16', random_seed=None, device="cuda:0"):
+    def __init__(self, num_envs=1, config='tracking', model='F16', random_seed=None, device="cuda:0", controller_type='ppo'):
         super().__init__(num_envs, config, model, random_seed, device)
         self.low_level_action_space = gym.spaces.Box(low=-np.inf,
                                                      high=np.inf,
                                                      shape=(4, ))
-        args = Args()
-        self.controller = PPOActor(args, self.observation_space, self.low_level_action_space, device=self.device)
-        self.controller.eval()
-        self.controller.load_state_dict(torch.load(ego_run_dir + f"/actor_latest.pt"))
-        self.ego_rnn_states = torch.zeros((self.n, 1, 128), device=torch.device(device))
+        self.controller_type = controller_type
+        
+        if controller_type == 'ppo':
+            args = Args()
+            self.controller = PPOActor(args, self.observation_space, self.low_level_action_space, device=self.device)
+            self.controller.eval()
+            self.controller.load_state_dict(torch.load(ego_run_dir + f"/actor_latest.pt"))
+            self.ego_rnn_states = torch.zeros((self.n, 1, 128), device=torch.device(device))
+        elif controller_type == 'pid':
+            # 初始化PID控制器
+            self.controller = Controller(dt=0.02, n=self.n, device=device)
+        else:
+            raise ValueError(f"Unsupported controller type: {controller_type}")
 
     def load(self, random_seed, config, model):
         if random_seed is not None:
@@ -152,10 +161,27 @@ class PlanningEnv(BaseEnv):
         target_vt = vt + action[:, 2] * 30
         for i in range(50):
             # low-level control
-            ego_obs = self.low_level_obs(target_pitch, target_heading, target_vt)
-            masks = torch.ones((self.n, 1), device=self.device)
-            with torch.no_grad():
-                ego_actions, _, self.ego_rnn_states = self.controller(ego_obs, self.ego_rnn_states, masks, deterministic=True)
+            if self.controller_type == 'ppo':
+                ego_obs = self.low_level_obs(target_pitch, target_heading, target_vt)
+                masks = torch.ones((self.n, 1), device=self.device)
+                with torch.no_grad():
+                    ego_actions, _, self.ego_rnn_states = self.controller(ego_obs, self.ego_rnn_states, masks, deterministic=True)
+            elif self.controller_type == 'pid':
+                # 使用PID控制器
+                # 计算速度缩放因子
+                vt_current = self.model.get_vt()
+                self.controller.calc_speed_scaler(vt_current)
+                
+                # 更新控制器目标
+                _, _, altitude = self.model.get_position()
+                target_altitude = altitude.reshape(-1, 1)  # 保持当前高度，确保正确的张量形状
+                target_vt_reshaped = target_vt.reshape(-1, 1)  # 确保正确的张量形状
+                self.controller.cal_pitch_throttle(target_altitude, target_vt_reshaped, self)
+                self.controller.update_heading_hold(target_heading, self)
+                self.controller.stabilize(self)
+                
+                # 获取控制动作
+                ego_actions = self.controller.get_action()
             
             # step
             self.model.update(ego_actions)

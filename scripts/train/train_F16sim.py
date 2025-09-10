@@ -26,7 +26,7 @@ def make_train_env(all_args):
             if all_args.env_name == "Control":
                 env = ControlEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device)
             elif all_args.env_name == "Planning":
-                env = PlanningEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device)
+                env = PlanningEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device, controller_type=all_args.controller_type)
             elif all_args.env_name == "SingleCombat":
                 env = SingleCombatEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, random_seed=all_args.seed, device=all_args.device)
             else:
@@ -43,7 +43,7 @@ def make_eval_env(all_args):
             if all_args.env_name == "Control":
                 env = ControlEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device)
             elif all_args.env_name == "Planning":
-                env = PlanningEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device)
+                env = PlanningEnv(num_envs=all_args.n_rollout_threads, config=all_args.scenario_name, model= all_args.model_name, random_seed=all_args.seed, device=all_args.device, controller_type=all_args.controller_type)
             elif all_args.env_name == "SingleCombat":
                 env = SingleCombatEnv(num_envs=all_args.n_eval_rollout_threads, config=all_args.scenario_name, random_seed=all_args.seed * 50000, device=all_args.device)
             else:
@@ -62,6 +62,8 @@ def parse_args(args, parser):
                        help="Which scenario to run on")
     group.add_argument('--model-name', type=str, default='F16',
                        help="Which model to run on")
+    group.add_argument('--controller-type', type=str, default='ppo', choices=['ppo', 'pid'],
+                       help="Which controller type to use for low-level control (ppo or pid)")
     all_args = parser.parse_known_args(args)[0]
     return all_args
 
