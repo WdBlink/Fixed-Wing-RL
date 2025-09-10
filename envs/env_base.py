@@ -119,7 +119,8 @@ class BaseEnv(gym.Env):
         return obs, reward, done, bad_done, exceed_time_limit, info
     
     def render(self, count, filename='./tracks/F16SimRecording-'):
-        """Renders the environment.
+        """
+        Renders the environment.
         The set of supported modes varies per environment. (And some
         environments do not support rendering at all.) By convention,
         Note:
@@ -164,6 +165,26 @@ class BaseEnv(gym.Env):
                 log_msg += f"Color=Red"
                 if log_msg is not None:
                     f.write(log_msg + "\n")
+                    
+                # 添加目标位置可视化（仅适用于TrackingTask）
+                if hasattr(self.task, 'target_npos') and hasattr(self.task, 'target_epos') and hasattr(self.task, 'target_altitude'):
+                    # 获取目标位置数据
+                    target_npos = _t2n(self.task.target_npos)[i] * 0.3048  # 转换为米
+                    target_epos = _t2n(self.task.target_epos)[i] * 0.3048  # 转换为米
+                    target_alt = _t2n(self.task.target_altitude)[i] * 0.3048  # 转换为米
+                    
+                    # 将目标位置从ENU转换为经纬高
+                    target_lat, target_lon, target_alt = enu_to_geodetic(
+                        target_epos, target_npos, target_alt,
+                        self.origin_lat, self.origin_lon, self.origin_alt
+                    )
+                    
+                    # 写入目标位置数据（使用不同的ID和颜色）
+                    target_log_msg = f"{200 + i},T={target_lon}|{target_lat}|{target_alt}|0|0|0,"
+                    target_log_msg += f"Name=Target_{i},"
+                    target_log_msg += f"Color=Blue"
+                    f.write(target_log_msg + "\n")
+                    
         reset = torch.any(self.bad_done + self.is_done + self.exceed_time_limit)
         if reset:
             self.create_records = False

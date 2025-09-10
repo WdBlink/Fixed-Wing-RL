@@ -8,7 +8,7 @@ import torch
 
 # add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from envs.control_env import ControlEnv
+from envs.planning_env import PlanningEnv
 from algorithms.ppo.ppo_actor import PPOActor
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -79,7 +79,7 @@ def main():
     os.makedirs("./result", exist_ok=True)
 
     # init env
-    env = ControlEnv(num_envs=1, config=config, model='F16', random_seed=cli.seed, device=device)
+    env = PlanningEnv(num_envs=1, config=config, model='F16', random_seed=cli.seed, device=device, controller_type='pid')
 
     # build policy and load weights
     net_args = Args(device)

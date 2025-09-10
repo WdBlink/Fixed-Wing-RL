@@ -91,7 +91,9 @@ def main():
         plt.figure()
         plt.plot(t, altitude[1:], color='r', label='real')
         if target_altitude is not None:
-            plt.plot(t, target_altitude[1:], color='b', label='target')
+            # Handle length mismatch by truncating target data to match actual data length
+            target_len = min(len(target_altitude[1:]), len(altitude[1:]))
+            plt.plot(t[:target_len], target_altitude[1:target_len+1], color='b', label='target')
         plt.legend()
         plt.xlabel('time/0.02s')
         plt.ylabel('altitude/feet')
@@ -104,7 +106,9 @@ def main():
         plt.figure()
         plt.plot(t, vt[1:], color='r', label='real')
         if target_vt is not None:
-            plt.plot(t, target_vt[1:], color='b', label='target')
+            # Handle length mismatch by truncating target data to match actual data length
+            target_len = min(len(target_vt[1:]), len(vt[1:]))
+            plt.plot(t[:target_len], target_vt[1:target_len+1], color='b', label='target')
         plt.legend()
         plt.xlabel('time/0.02s')
         plt.ylabel('vt/feet')
@@ -145,7 +149,9 @@ def main():
         plt.figure()
         plt.plot(t, yaw[1:] * 180 / np.pi, color='b', label='real')
         if target_heading is not None:
-            plt.plot(t, target_heading[1:] * 180 / np.pi, color='r', label='target')
+            # Handle length mismatch by truncating target data to match actual data length
+            target_len = min(len(target_heading[1:]), len(yaw[1:]))
+            plt.plot(t[:target_len], target_heading[1:target_len+1] * 180 / np.pi, color='r', label='target')
         plt.legend()
         plt.xlabel('time/0.02s')
         plt.ylabel('yaw/deg')
