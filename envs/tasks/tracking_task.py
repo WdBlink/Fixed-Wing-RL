@@ -74,7 +74,7 @@ class TrackingTask(BaseTask):
         """
         Convert simulation states into the format of observation_space.
 
-        observation(dim 22):
+        observation(dim 25):
             0. ego_delta_npos      (unit: km)
             1. ego_delta_epos       (unit km)
             2. ego_delta_altitude            (unit: km)
@@ -97,6 +97,9 @@ class TrackingTask(BaseTask):
             19. ego_rud                (unit: %)
             20. ego_lef                (unit: %)
             21. EAS2TAS
+            22. gps2_delta_npos        (unit: km)   # 光学定位测量-目标的北向偏差
+            23. gps2_delta_epos        (unit: km)   # 光学定位测量-目标的东向偏差
+            24. gps2_delta_altitude    (unit: km)   # 光学定位测量-目标的高度偏差
         """
         npos, epos, altitude = env.model.get_position()
         roll, pitch, heading = env.model.get_posture()
@@ -152,4 +155,26 @@ class TrackingTask(BaseTask):
         obs = torch.hstack((obs, norm_rud))
         obs = torch.hstack((obs, norm_lef))
         obs = torch.hstack((obs, eas2tas.reshape(-1, 1)))
+
+        # 追加：gps2 光学定位测量（带延迟+姿态相关噪声）与目标的偏差（单位：km）
+        if getattr(env, 'gps2_enabled', False):
+            gps2 = env.get_gps2_optical()
+            # 测量位置（m）转 km，并与目标（feet->m）求偏差
+            meas_n_m = gps2['enu_m'][:, 0].reshape(-1, 1)
+            meas_e_m = gps2['enu_m'][:, 1].reshape(-1, 1)
+            meas_u_m = gps2['enu_m'][:, 2].reshape(-1, 1)
+            tgt_n_m = self.target_npos.reshape(-1, 1) * 0.3048
+            tgt_e_m = self.target_epos.reshape(-1, 1) * 0.3048
+            tgt_u_m = self.target_altitude.reshape(-1, 1) * 0.3048
+            gps2_delta_n_km = (meas_n_m - tgt_n_m) / 1000.0
+            gps2_delta_e_km = (meas_e_m - tgt_e_m) / 1000.0
+            gps2_delta_u_km = (meas_u_m - tgt_u_m) / 1000.0
+        else:
+            # 若未启用 gps2，也维持观测维度（补零）
+            zeros = torch.zeros(self.n, 1, device=self.device)
+            gps2_delta_n_km = zeros
+            gps2_delta_e_km = zeros
+            gps2_delta_u_km = zeros
+
+        obs = torch.hstack((obs, gps2_delta_n_km, gps2_delta_e_km, gps2_delta_u_km))
         return obs + torch.randn_like(obs) * self.noise_scale

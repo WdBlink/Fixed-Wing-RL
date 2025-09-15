@@ -10,7 +10,7 @@ num_agents: 1
 num_states: 12
 num_controls: 5
 num_actions: 3
-num_observation: 22
+num_observation: 25
 max_steps: 2500             # episode length: 200s
 
 # aircraft config
@@ -26,7 +26,7 @@ color: Red
 model: f16
 
 # target config
-max_distance: 2000 # feet
+max_distance: 10000 # feet
 min_distance: 2000  # feet
 max_check_interval: 2500                 # step
 min_check_interval: 300
@@ -44,3 +44,16 @@ min_vt: 1000
 origin_lat: 34.000000   # 度（纬度，北纬为正）
 origin_lon: 108.000000  # 度（经度，东经为正）
 origin_alt: 0       # 米（海拔高度，ASL）
+
+# gps2 optical positioning config
+gps2_enabled: true
+# 数据通道延迟建模（秒）
+gps2_delay_s: 0.2
+# 延迟抖动（秒，标准差）
+gps2_delay_jitter_s: 0.02
+# 正常姿态噪声（米，1-sigma）
+gps2_noise_std_m: 1.5
+# 姿态超过云台限位时噪声（米，1-sigma）
+gps2_noise_std_m_max: 8.0
+# 云台限位（度）
+gps2_gimbal_limit_deg: 25.0

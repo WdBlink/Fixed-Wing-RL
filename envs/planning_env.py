@@ -160,6 +160,10 @@ class PlanningEnv(BaseEnv):
         target_heading = yaw + action[:, 1] * 0.3
         target_vt = vt + action[:, 2] * 30
         for i in range(50):
+            # 在每个内部仿真步开始前清理 gps2 测量缓存，确保同一步内 obs 与 info 复用同一份采样
+            if getattr(self, 'gps2_enabled', False):
+                # 同一步缓存：首次访问时生成一次，后续访问复用
+                self._gps2_clear_cache()
             # low-level control
             if self.controller_type == 'ppo':
                 ego_obs = self.low_level_obs(target_pitch, target_heading, target_vt)
@@ -185,6 +189,9 @@ class PlanningEnv(BaseEnv):
             
             # step
             self.model.update(ego_actions)
+            # 推送 gps2 光学定位缓冲样本（延迟观测使用）
+            if getattr(self, 'gps2_enabled', False):
+                self._gps2_push_sample()
             done = self.is_done.bool()
             bad_done = self.bad_done.bool()
             exceed_time_limit = self.exceed_time_limit.bool()
