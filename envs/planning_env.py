@@ -167,6 +167,8 @@ class PlanningEnv(BaseEnv):
         target_vt = vt + action[:, 2] * 30
         # EKF 融合门控（[0,1]），值越小越不信任测量
         fuse_gate = (action[:, 3].reshape(-1, 1) + 1.0) * 0.5
+        # 存储当前的融合门控值，用于info输出
+        self.current_fuse_gate = fuse_gate.clone()
         for i in range(50):
             # 在每个内部仿真步开始前清理 gps2 测量缓存，确保同一步内 obs 与 info 复用同一份采样
             if getattr(self, 'gps2_enabled', False):
@@ -222,3 +224,18 @@ class PlanningEnv(BaseEnv):
                 self.render(count=count)
             count += 1
         return obs, reward, done, bad_done, exceed_time_limit, info
+    
+    def info(self):
+        """重写info方法，添加融合门控信息
+        
+        Returns:
+            dict: 包含导航信息和GPS2融合门控值
+        """
+        # 调用父类的info方法获取基础信息
+        info_dict = super().info()
+        
+        # 添加融合门控信息
+        if hasattr(self, 'current_fuse_gate'):
+            info_dict['fuse_gate'] = self.current_fuse_gate
+        
+        return info_dict

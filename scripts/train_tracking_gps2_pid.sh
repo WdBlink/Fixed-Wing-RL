@@ -52,6 +52,6 @@ python train/train_F16sim.py \
   --num-mini-batch ${num_mini_batch} --buffer-size ${buffer_size} --num-env-steps ${num_env_steps} \
   --lr ${lr} --gamma ${gamma} --ppo-epoch ${ppo_epoch} --clip-params ${clip_params} --max-grad-norm 2 --entropy-coef ${entropy_coef} \
   --hidden-size "${hidden_size}" --act-hidden-size "${act_hidden_size}" --recurrent-hidden-size ${recurrent_hidden_size} --recurrent-hidden-layers ${recurrent_hidden_layers} --data-chunk-length ${data_chunk_length} \
-  --controller-type "${controller_type}"
+  --controller-type "${controller_type}" --use-nav-loss
 
 echo "[INFO] 训练进程已启动，日志与权重将保存在 scripts/runs/ 目录下。"

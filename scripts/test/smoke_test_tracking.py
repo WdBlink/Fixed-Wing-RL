@@ -12,9 +12,6 @@
 
 用法:
     python scripts/smoke_test_tracking.py --steps 5 --device cpu
-
-代码风格:
-    - 遵循谷歌代码风格。
 """
 from __future__ import annotations
 import argparse

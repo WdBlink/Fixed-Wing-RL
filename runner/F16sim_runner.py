@@ -11,6 +11,7 @@ from base_runner import Runner, ReplayBuffer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from algorithms.ppo.ppo_trainer import PPOTrainer as Trainer
 from algorithms.ppo.ppo_policy import PPOPolicy as Policy
+from tqdm import tqdm
 # import cProfile
 # import pdb
 # import io
@@ -46,6 +47,9 @@ class F16SimRunner(Runner):
         self.use_nav_loss = getattr(self.all_args, 'use_nav_loss', False)
         self.nav_loss_coef = getattr(self.all_args, 'nav_loss_coef', 1e-4)
         
+        # 调试：打印导航损失配置
+        print(f"[初始化] use_nav_loss: {self.use_nav_loss}, nav_loss_coef: {self.nav_loss_coef}")
+        
         # 导航MSE统计
         self.nav_mse_stats = []
 
@@ -53,16 +57,22 @@ class F16SimRunner(Runner):
             self.restore()
 
     def run(self):
+        """
+        运行训练循环
+        """
+        print("[调试] F16SimRunner.run() 方法开始执行")
         self.warmup()
 
         start = time.time()
         self.total_num_steps = 0
         episodes = self.num_env_steps // self.buffer_size // self.n_rollout_threads
 
-        for episode in range(episodes):
+        for episode in tqdm(range(episodes), desc="Episode"):
+            print(f"[调试] 开始第{episode}个episode，总共{episodes}个episodes")
             # global profile
             # profile.enable()
             for step in range(self.buffer_size):
+                print(f"[调试] Episode {episode}, Step {step}")
                 # Sample actions
                 values, actions, action_log_probs, rnn_states_actor, rnn_states_critic = self.collect(step)
 
@@ -170,23 +180,91 @@ class F16SimRunner(Runner):
         Returns:
             tuple: (nav_pos_est, nav_pos_true, nav_mse_mean)
         """
-        n_envs = len(infos)
-        nav_pos_est = np.zeros((n_envs, self.num_agents, 3), dtype=np.float32)
-        nav_pos_true = np.zeros((n_envs, self.num_agents, 3), dtype=np.float32)
+        # 简化调试输出，只在第一次调用时打印
+        if not hasattr(self, '_first_call_debug'):
+            self._first_call_debug = True
+            print(f"[调试] _compute_nav_mse_and_reward_shaping首次调用，infos类型: {type(infos)}")
+            
+            # 检查infos的结构
+            if isinstance(infos, dict):
+                print(f"[调试] infos是字典，键: {list(infos.keys())}")
+            elif isinstance(infos, (list, tuple)) and len(infos) > 0:
+                print(f"[调试] infos是列表/元组，长度: {len(infos)}")
+                if isinstance(infos[0], dict):
+                    print(f"[调试] infos[0]的键: {list(infos[0].keys())}")
+                    if 'nav' in infos[0]:
+                        print(f"[调试] ✅ 找到nav键")
+                    else:
+                        print(f"[调试] ❌ 未找到nav键")
+        
+        # 使用n_rollout_threads而不是len(infos)来确保形状匹配
+        nav_pos_est = np.zeros((self.n_rollout_threads, self.num_agents, 3), dtype=np.float32)
+        nav_pos_true = np.zeros((self.n_rollout_threads, self.num_agents, 3), dtype=np.float32)
         nav_mse_mean = 0.0
         
         if self.use_nav_loss:
             nav_mse_list = []
             
-            for i, info in enumerate(infos):
-                 # 检查info的类型和结构
-                 if isinstance(info, dict) and 'nav' in info:
-                     nav_info = info['nav']
+            # 处理所有n_rollout_threads个环境
+            for i in range(self.n_rollout_threads):
+                 # 检查是否有对应的info数据
+                 # infos可能是字典或列表，需要兼容处理
+                 info_data = None
+                 if isinstance(infos, dict):
+                     info_data = infos.get(i, {})
+                 elif isinstance(infos, list) and i < len(infos):
+                     info_data = infos[i]
+                 
+                 if info_data and isinstance(info_data, dict) and 'nav' in info_data:
+                     nav_info = info_data['nav']
                      # 提取导航估计和真值 (单位：米)
                      pos_est = nav_info.get('pos_m_est', np.zeros(3))
                      pos_true = nav_info.get('pos_m_true', np.zeros(3))
+                     
+                     # 获取GPS2测量数据和采信度信息
+                     gps2_info = info_data.get('gps2_optical', {})
+                     if gps2_info:
+                         gps2_pos = gps2_info.get('enu_m', np.zeros(3))
+                         gps2_noise_std = gps2_info.get('noise_std_m', 0.0)
+                         
+                         # 计算GPS2与真值的偏差
+                         if isinstance(gps2_pos, torch.Tensor):
+                             gps2_pos_np = gps2_pos.cpu().numpy()
+                         else:
+                             gps2_pos_np = np.array(gps2_pos)
+                         
+                         if isinstance(pos_true, torch.Tensor):
+                             pos_true_np = pos_true.cpu().numpy()
+                         else:
+                             pos_true_np = np.array(pos_true)
+                         
+                         # 计算GPS2偏差距离
+                         gps2_error = np.linalg.norm(gps2_pos_np.flatten()[:3] - pos_true_np.flatten()[:3])
+                        
+                        # 获取agent对GPS2的真实采信度（融合门控值）
+                         fuse_gate_info = info_data.get('fuse_gate', None)
+                         if fuse_gate_info is not None:
+                            if isinstance(fuse_gate_info, torch.Tensor):
+                                agent_trust = fuse_gate_info.cpu().numpy().flatten()[0]
+                            else:
+                                agent_trust = float(fuse_gate_info)
+                         else:
+                            # 如果没有fuse_gate信息，使用噪声估算
+                            agent_trust = 1.0 / (1.0 + gps2_noise_std)
+                         
+                         # 每10个环境打印一次，避免输出过多
+                         if i % 10 == 0:
+                             print(f"[GPS2监控] Env{i:2d}: GPS2偏差={gps2_error:.2f}m, 噪声std={gps2_noise_std:.2f}m, Agent采信度={agent_trust:.3f}")
+                             
+                             # 如果偏差较大或采信度异常，额外提醒
+                             if gps2_error > 10.0:
+                                 print(f"  ⚠️  GPS2偏差过大: {gps2_error:.2f}m")
+                             if agent_trust < 0.3:
+                                 print(f"  ⚠️  Agent对GPS2采信度较低: {agent_trust:.3f}")
+                             elif agent_trust > 0.8:
+                                 print(f"  ✅ Agent对GPS2采信度较高: {agent_trust:.3f}")
                  else:
-                     # 如果info不是字典或没有nav字段，使用默认值
+                     # 如果没有对应的info或nav字段，使用默认值
                      pos_est = np.zeros(3)
                      pos_true = np.zeros(3)
                  
@@ -203,8 +281,9 @@ class F16SimRunner(Runner):
                  mse = np.mean((pos_est - pos_true) ** 2)
                  nav_mse_list.append(mse)
                  
-                 # 奖励塑形：减去MSE损失
-                 rewards[i] -= self.nav_loss_coef * mse
+                 # 奖励塑形：减去MSE损失 (只对有效的环境进行)
+                 if i < len(rewards):
+                     rewards[i] -= self.nav_loss_coef * mse
             
             if nav_mse_list:
                 nav_mse_mean = np.mean(nav_mse_list)
