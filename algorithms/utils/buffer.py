@@ -68,6 +68,13 @@ class ReplayBuffer(Buffer):
         self.rnn_states_actor = np.zeros((self.buffer_size + 1, self.n_rollout_threads, self.num_agents,
                                           self.recurrent_hidden_layers, self.recurrent_hidden_size), dtype=np.float32)
         self.rnn_states_critic = np.zeros_like(self.rnn_states_actor)
+        
+        # 导航信息存储 (用于MSE损失计算)
+        # nav_pos_est: 融合定位估计轨迹 (x, y, z) in meters
+        # nav_pos_true: 真实定位轨迹 (x, y, z) in meters
+        # 注意：与actions/rewards对齐，不需要+1的时间轴
+        self.nav_pos_est = np.zeros((self.buffer_size, self.n_rollout_threads, self.num_agents, 3), dtype=np.float32)
+        self.nav_pos_true = np.zeros((self.buffer_size, self.n_rollout_threads, self.num_agents, 3), dtype=np.float32)
 
         self.step = 0
 
@@ -89,6 +96,8 @@ class ReplayBuffer(Buffer):
                rnn_states_actor: np.ndarray,
                rnn_states_critic: np.ndarray,
                bad_masks: Union[np.ndarray, None] = None,
+               nav_pos_est: Union[np.ndarray, None] = None,
+               nav_pos_true: Union[np.ndarray, None] = None,
                **kwargs):
         """Insert numpy data.
         Args:
@@ -101,6 +110,8 @@ class ReplayBuffer(Buffer):
             rnn_states_actor:   ha_{t+1}
             rnn_states_critic:  hc_{t+1}
             bad_masks:          bad_mask[t+1] = bad_done_{t}
+            nav_pos_est:        融合定位估计 (x, y, z) in meters at step t
+            nav_pos_true:       真实定位 (x, y, z) in meters at step t
         """
         self.obs[self.step + 1] = obs.copy()
         self.actions[self.step] = actions.copy()
@@ -112,6 +123,12 @@ class ReplayBuffer(Buffer):
         self.rnn_states_critic[self.step + 1] = rnn_states_critic.copy()
         if bad_masks is not None:
             self.bad_masks[self.step + 1] = bad_masks.copy()
+        
+        # 存储导航信息用于MSE损失计算
+        if nav_pos_est is not None:
+            self.nav_pos_est[self.step] = nav_pos_est.copy()
+        if nav_pos_true is not None:
+            self.nav_pos_true[self.step] = nav_pos_true.copy()
 
         self.step = (self.step + 1) % self.buffer_size
 
@@ -213,6 +230,10 @@ class ReplayBuffer(Buffer):
         value_preds = np.vstack([ReplayBuffer._cast(buf.value_preds[:-1]) for buf in buffer])
         rnn_states_actor = np.vstack([ReplayBuffer._cast(buf.rnn_states_actor[:-1]) for buf in buffer])
         rnn_states_critic = np.vstack([ReplayBuffer._cast(buf.rnn_states_critic[:-1]) for buf in buffer])
+        
+        # 导航数据处理 (与actions对齐，无需:-1)
+        nav_pos_est = np.vstack([ReplayBuffer._cast(buf.nav_pos_est) for buf in buffer])
+        nav_pos_true = np.vstack([ReplayBuffer._cast(buf.nav_pos_true) for buf in buffer])
 
         # Get mini-batch size and shuffle chunk data
         data_chunks = n_rollout_threads * buffer_size // data_chunk_length
@@ -230,6 +251,8 @@ class ReplayBuffer(Buffer):
             value_preds_batch = []
             rnn_states_actor_batch = []
             rnn_states_critic_batch = []
+            nav_pos_est_batch = []
+            nav_pos_true_batch = []
 
             for index in indices:
 
@@ -242,6 +265,9 @@ class ReplayBuffer(Buffer):
                 advantages_batch.append(advantages[ind:ind + data_chunk_length])
                 returns_batch.append(returns[ind:ind + data_chunk_length])
                 value_preds_batch.append(value_preds[ind:ind + data_chunk_length])
+                # 导航数据批处理
+                nav_pos_est_batch.append(nav_pos_est[ind:ind + data_chunk_length])
+                nav_pos_true_batch.append(nav_pos_true[ind:ind + data_chunk_length])
                 # size [T+1, N, Dim] => [T, N, Dim] => [N, T, Dim] => [N * T, Dim] => [1, Dim]
                 rnn_states_actor_batch.append(rnn_states_actor[ind])
                 rnn_states_critic_batch.append(rnn_states_critic[ind])
@@ -256,6 +282,8 @@ class ReplayBuffer(Buffer):
             advantages_batch = np.stack(advantages_batch, axis=1)
             returns_batch = np.stack(returns_batch, axis=1)
             value_preds_batch = np.stack(value_preds_batch, axis=1)
+            nav_pos_est_batch = np.stack(nav_pos_est_batch, axis=1)
+            nav_pos_true_batch = np.stack(nav_pos_true_batch, axis=1)
 
             # States is just a (N, -1) from_numpy
             rnn_states_actor_batch = np.stack(rnn_states_actor_batch).reshape(N, *buffer[0].rnn_states_actor.shape[3:])
@@ -269,9 +297,25 @@ class ReplayBuffer(Buffer):
             advantages_batch = ReplayBuffer._flatten(L, N, advantages_batch)
             returns_batch = ReplayBuffer._flatten(L, N, returns_batch)
             value_preds_batch = ReplayBuffer._flatten(L, N, value_preds_batch)
+            nav_pos_est_batch = ReplayBuffer._flatten(L, N, nav_pos_est_batch)
+            nav_pos_true_batch = ReplayBuffer._flatten(L, N, nav_pos_true_batch)
 
-            yield obs_batch, actions_batch, masks_batch, old_action_log_probs_batch, advantages_batch, \
-                returns_batch, value_preds_batch, rnn_states_actor_batch, rnn_states_critic_batch
+            # 构建包含导航数据的sample字典
+            sample = {
+                'obs': obs_batch,
+                'actions': actions_batch,
+                'masks': masks_batch,
+                'old_action_log_probs': old_action_log_probs_batch,
+                'advantages': advantages_batch,
+                'returns': returns_batch,
+                'value_preds': value_preds_batch,
+                'rnn_states_actor': rnn_states_actor_batch,
+                'rnn_states_critic': rnn_states_critic_batch,
+                'nav_pos_est': nav_pos_est_batch,
+                'nav_pos_true': nav_pos_true_batch
+            }
+            
+            yield sample
 
 
 class SharedReplayBuffer(ReplayBuffer):

@@ -25,9 +25,35 @@ class PPOTrainer():
         self.data_chunk_length = args.data_chunk_length
 
     def ppo_update(self, policy: PPOPolicy, sample):
-
-        obs_batch, actions_batch, masks_batch, old_action_log_probs_batch, advantages_batch, \
-            returns_batch, value_preds_batch, rnn_states_actor_batch, rnn_states_critic_batch = sample
+        """PPO策略更新方法，支持导航损失记录
+        
+        Args:
+            policy: PPO策略对象
+            sample: 训练样本，可以是tuple或dict格式
+            
+        Returns:
+            tuple: (policy_loss, value_loss, policy_entropy_loss, ratio, actor_grad_norm, critic_grad_norm, nav_mse)
+        """
+        # 兼容新旧sample格式
+        if isinstance(sample, dict):
+            obs_batch = sample['obs']
+            actions_batch = sample['actions']
+            masks_batch = sample['masks']
+            old_action_log_probs_batch = sample['old_action_log_probs']
+            advantages_batch = sample['advantages']
+            returns_batch = sample['returns']
+            value_preds_batch = sample['value_preds']
+            rnn_states_actor_batch = sample['rnn_states_actor']
+            rnn_states_critic_batch = sample['rnn_states_critic']
+            # 导航数据（可选）
+            nav_pos_est_batch = sample.get('nav_pos_est', None)
+            nav_pos_true_batch = sample.get('nav_pos_true', None)
+        else:
+            # 兼容旧的tuple格式
+            obs_batch, actions_batch, masks_batch, old_action_log_probs_batch, advantages_batch, \
+                returns_batch, value_preds_batch, rnn_states_actor_batch, rnn_states_critic_batch = sample
+            nav_pos_est_batch = None
+            nav_pos_true_batch = None
 
         old_action_log_probs_batch = check(old_action_log_probs_batch).to(**self.tpdv)
         advantages_batch = check(advantages_batch).to(**self.tpdv)
@@ -72,7 +98,16 @@ class PPOTrainer():
             critic_grad_norm = get_gard_norm(policy.critic.parameters())
         policy.optimizer.step()
 
-        return policy_loss, value_loss, policy_entropy_loss, ratio, actor_grad_norm, critic_grad_norm
+        # 计算导航MSE损失（仅用于记录，不参与梯度更新）
+        nav_mse = 0.0
+        if nav_pos_est_batch is not None and nav_pos_true_batch is not None:
+            nav_pos_est_tensor = check(nav_pos_est_batch).to(**self.tpdv)
+            nav_pos_true_tensor = check(nav_pos_true_batch).to(**self.tpdv)
+            # 计算逐分量MSE: (est - true)^2，然后在空间维度上求均值
+            nav_mse = torch.mean((nav_pos_est_tensor - nav_pos_true_tensor).pow(2))
+            nav_mse = nav_mse.item()
+
+        return policy_loss, value_loss, policy_entropy_loss, ratio, actor_grad_norm, critic_grad_norm, nav_mse
 
     def train(self, policy: PPOPolicy, buffer: Union[ReplayBuffer, List[ReplayBuffer]]):
         train_info = {}
@@ -92,7 +127,7 @@ class PPOTrainer():
             for sample in data_generator:
 
                 policy_loss, value_loss, policy_entropy_loss, ratio, \
-                    actor_grad_norm, critic_grad_norm = self.ppo_update(policy, sample)
+                    actor_grad_norm, critic_grad_norm, nav_mse = self.ppo_update(policy, sample)
 
                 train_info['value_loss'] += value_loss.item()
                 train_info['policy_loss'] += policy_loss.item()
@@ -100,6 +135,10 @@ class PPOTrainer():
                 train_info['actor_grad_norm'] += actor_grad_norm
                 train_info['critic_grad_norm'] += critic_grad_norm
                 train_info['ratio'] += ratio.mean().item()
+                # 记录导航MSE损失
+                if 'nav_mse' not in train_info:
+                    train_info['nav_mse'] = 0
+                train_info['nav_mse'] += nav_mse
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 

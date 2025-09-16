@@ -1,59 +1,74 @@
-# atmos config
-airspeed: 0
-noise_scale: 0
+# 文件作者: wdblink
+# 说明: Tracking 场景的环境与任务配置（扁平键，兼容 BaseEnv/TrackingTask 读取）
+# 注意: 本配置中 num_actions = 4，其中第 4 维为 gps2 融合门控 (gate ∈ [0,1])
 
-# simulation config
+# ===== 基础环境配置 =====
+airspeed: 0
+noise_scale: 0.0
+
+# 仿真相关
 sim_freq: 60
 solver: euler
 dt: 0.02
 num_agents: 1
 num_states: 12
 num_controls: 5
-num_actions: 3
-num_observation: 25
-max_steps: 2500             # episode length: 200s
 
-# aircraft config
+# 观测/动作维度
+num_actions: 4           # 高层动作维度，第 4 维为 EKF 融合门控
+num_observation: 25      # TrackingTask.get_obs 定义的观测维度
+max_steps: 5000          # episode length
+
+# 机型与初始状态（与控制场景保持一致，按需调整）
 altitude_limit: 2500.0
 acceleration_limit: 300.0
-max_velocity: 3          # mh
-min_velocity: 0.01       # mh
-min_alpha: -20             # 度
-max_alpha: 45              # 度
+max_velocity: 3
+min_velocity: 0.01
+min_alpha: -20
+max_alpha: 45
 min_beta: -30
 max_beta: 30
 color: Red
 model: f16
 
-# target config
-max_distance: 10000 # feet
-min_distance: 2000  # feet
-max_check_interval: 2500                 # step
-min_check_interval: 300
+# 目标参数（Tracking 任务相关）
+max_distance: 2000
+min_distance: 2000
 
-# init config
-init_state: {
-  init_altitude_ft: 20000,
-  init_vt_ft: 1100,
+# 初始化状态
+init_state:
+  init_altitude_ft: 20000
+  init_heading: 0
+  init_vt_ft: 1100
   init_T: 2000
-}
 max_altitude: 20000
 min_altitude: 19000
 max_vt: 1200
 min_vt: 1000
-origin_lat: 34.000000   # 度（纬度，北纬为正）
-origin_lon: 108.000000  # 度（经度，东经为正）
-origin_alt: 0       # 米（海拔高度，ASL）
 
-# gps2 optical positioning config
+# 地理参考原点（用于 ENU <-> 经纬高 转换）
+origin_lat: 34.000000
+origin_lon: 108.000000
+origin_alt: 0
+
+# ===== gps2（光学定位）通道配置（BaseEnv 期望的扁平键） =====
+# 由原先的层级键 sensors.gps2.* 展平为以下键名
+# delay_steps = 3 对应 dt=0.02 时的 0.06 s 延迟
 gps2_enabled: true
-# 数据通道延迟建模（秒）
-gps2_delay_s: 0.2
-# 延迟抖动（秒，标准差）
-gps2_delay_jitter_s: 0.02
-# 正常姿态噪声（米，1-sigma）
-gps2_noise_std_m: 1.5
-# 姿态超过云台限位时噪声（米，1-sigma）
-gps2_noise_std_m_max: 8.0
-# 云台限位（度）
+gps2_delay_s: 0.06
+gps2_delay_jitter_s: 0.0
+gps2_noise_std_m: 1.0
+gps2_noise_std_m_max: 10.0
 gps2_gimbal_limit_deg: 25.0
+
+# ===== 观测模式配置 =====
+# obs_schema: 控制观测中位置信息的来源
+# - "true": 使用真值位置构造相对目标偏差（默认，完全可观测）
+# - "estimated": 使用融合估计位置构造相对目标偏差（有误差/延迟/漂移）
+# - "none": 不提供位置相关信息（完全无里程计模式，前3维补零）
+obs_schema: "estimated"
+
+# ===== 导航（DR+EKF）参数（当前 BaseEnv 使用内部默认值，保留注释备忘） =====
+# ekf_process_std_mps: 0.5    # 若后续在 BaseEnv 中暴露，可映射为 _nav_process_sigma_mps
+# ekf_meas_std_m: 1.0         # 若需要，可用于覆盖光学测量噪声（目前按姿态动态设定）
+# ekf_gate_min: 1e-3          # 融合门控下限，避免数值不稳定

@@ -55,6 +55,17 @@ def make_eval_env(all_args):
 
 
 def parse_args(args, parser):
+    """解析F16Sim环境相关参数，包括导航损失配置
+    
+    Args:
+        args: 命令行参数列表
+        parser: 参数解析器
+        
+    Returns:
+        all_args: 解析后的参数对象
+        
+    Author: wdblink
+    """
     group = parser.add_argument_group("F16Sim Env parameters")
     group.add_argument("--env-name", type=str, default='Control',
                        help="specify the name of environment")
@@ -64,6 +75,14 @@ def parse_args(args, parser):
                        help="Which model to run on")
     group.add_argument('--controller-type', type=str, default='ppo', choices=['ppo', 'pid'],
                        help="Which controller type to use for low-level control (ppo or pid)")
+    
+    # 导航损失相关参数
+    nav_group = parser.add_argument_group("Navigation Loss parameters")
+    nav_group.add_argument('--use-nav-loss', action='store_true', default=False,
+                          help="Enable navigation MSE loss for reward shaping")
+    nav_group.add_argument('--nav-loss-coef', type=float, default=1e-4,
+                          help="Coefficient for navigation MSE loss in reward shaping (default: 1e-4)")
+    
     all_args = parser.parse_known_args(args)[0]
     return all_args
 

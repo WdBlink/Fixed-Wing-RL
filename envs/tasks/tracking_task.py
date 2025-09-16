@@ -29,6 +29,12 @@ class TrackingTask(BaseTask):
         self.max_distance = getattr(self.config, 'max_distance', 2000)
         self.min_distance = getattr(self.config, 'min_distance', 2000)
         self.noise_scale = getattr(self.config, 'noise_scale', 0.01)
+        
+        # 观测模式配置
+        # "true": 使用真值位置（完全可观测）
+        # "estimated": 使用融合估计位置（有误差/延迟/漂移）
+        # "none": 不提供位置信息（完全无里程计模式）
+        self.obs_schema = getattr(self.config, 'obs_schema', 'true')
 
         self.reward_functions = [
             PositionReward(self.config),
@@ -101,7 +107,7 @@ class TrackingTask(BaseTask):
             23. gps2_delta_epos        (unit: km)   # 光学定位测量-目标的东向偏差
             24. gps2_delta_altitude    (unit: km)   # 光学定位测量-目标的高度偏差
         """
-        npos, epos, altitude = env.model.get_position()
+        # 获取飞行状态信息
         roll, pitch, heading = env.model.get_posture()
         vt = env.model.get_vt()
         EAS = env.model.get_EAS()
@@ -111,10 +117,45 @@ class TrackingTask(BaseTask):
         T = env.model.get_thrust()
         el, ail, rud, lef = env.model.get_control_surface()
         eas2tas = env.model.get_EAS2TAS()
-
-        norm_delta_npos = (npos - self.target_npos).reshape(-1, 1) * 0.3048 / 1000
-        norm_delta_epos = (epos - self.target_epos).reshape(-1, 1) * 0.3048 / 1000
-        norm_delta_altitude = (altitude - self.target_altitude).reshape(-1, 1) * 0.3048 / 1000
+        
+        # 获取真值位置（用于norm_altitude计算，不影响相对偏差的obs_schema选择）
+        _, _, altitude = env.model.get_position()
+        
+        # 根据obs_schema选择位置信息来源
+        if self.obs_schema == "true":
+            # 使用真值位置构造相对目标偏差
+            npos, epos, altitude = env.model.get_position()
+            norm_delta_npos = (npos - self.target_npos).reshape(-1, 1) * 0.3048 / 1000
+            norm_delta_epos = (epos - self.target_epos).reshape(-1, 1) * 0.3048 / 1000
+            norm_delta_altitude = (altitude - self.target_altitude).reshape(-1, 1) * 0.3048 / 1000
+        elif self.obs_schema == "estimated":
+            # 使用融合估计位置构造相对目标偏差（有误差/延迟/漂移）
+            if hasattr(env, '_nav_pos_m_est') and env._nav_initialized:
+                # 融合估计位置（米）转换为英尺，然后计算相对偏差
+                est_npos_ft = env._nav_pos_m_est[:, 0] / 0.3048  # N方向，米->英尺
+                est_epos_ft = env._nav_pos_m_est[:, 1] / 0.3048  # E方向，米->英尺
+                est_alt_ft = env._nav_pos_m_est[:, 2] / 0.3048   # U方向，米->英尺
+                norm_delta_npos = (est_npos_ft - self.target_npos).reshape(-1, 1) * 0.3048 / 1000
+                norm_delta_epos = (est_epos_ft - self.target_epos).reshape(-1, 1) * 0.3048 / 1000
+                norm_delta_altitude = (est_alt_ft - self.target_altitude).reshape(-1, 1) * 0.3048 / 1000
+            else:
+                # 如果融合估计未初始化，回退到真值（避免训练初期崩溃）
+                npos, epos, altitude = env.model.get_position()
+                norm_delta_npos = (npos - self.target_npos).reshape(-1, 1) * 0.3048 / 1000
+                norm_delta_epos = (epos - self.target_epos).reshape(-1, 1) * 0.3048 / 1000
+                norm_delta_altitude = (altitude - self.target_altitude).reshape(-1, 1) * 0.3048 / 1000
+        elif self.obs_schema == "none":
+            # 完全无里程计模式：不提供位置相关信息（前3维补零）
+            zeros = torch.zeros(self.n, 1, device=self.device)
+            norm_delta_npos = zeros
+            norm_delta_epos = zeros
+            norm_delta_altitude = zeros
+        else:
+            # 默认使用真值位置
+            npos, epos, altitude = env.model.get_position()
+            norm_delta_npos = (npos - self.target_npos).reshape(-1, 1) * 0.3048 / 1000
+            norm_delta_epos = (epos - self.target_epos).reshape(-1, 1) * 0.3048 / 1000
+            norm_delta_altitude = (altitude - self.target_altitude).reshape(-1, 1) * 0.3048 / 1000
         norm_altitude = altitude.reshape(-1, 1) * 0.3048 / 5000
         roll_sin = torch.sin(roll.reshape(-1, 1))
         roll_cos = torch.cos(roll.reshape(-1, 1))

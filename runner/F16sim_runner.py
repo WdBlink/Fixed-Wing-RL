@@ -23,6 +23,12 @@ def _t2n(x):
 
 
 class F16SimRunner(Runner):
+    """F16仿真环境的PPO训练运行器
+    
+    支持导航MSE损失计算和奖励塑形功能，用于约束agent融合定位轨迹与真实轨迹的重合度。
+    
+    Author: wdblink
+    """
 
     def load(self):
         self.obs_space = self.envs.observation_space
@@ -35,6 +41,13 @@ class F16SimRunner(Runner):
 
         # buffer
         self.buffer = ReplayBuffer(self.all_args, self.num_agents, self.obs_space, self.act_space)
+        
+        # 导航损失相关配置
+        self.use_nav_loss = getattr(self.all_args, 'use_nav_loss', False)
+        self.nav_loss_coef = getattr(self.all_args, 'nav_loss_coef', 1e-4)
+        
+        # 导航MSE统计
+        self.nav_mse_stats = []
 
         if self.model_dir is not None:
             self.restore()
@@ -58,12 +71,15 @@ class F16SimRunner(Runner):
                 # print('action:', actions)
                 # print(episode, step, rewards)
 
+                # 导航MSE计算和奖励塑形
+                nav_pos_est, nav_pos_true, nav_mse = self._compute_nav_mse_and_reward_shaping(infos, rewards)
+
                 # Extra recorded information
                 # for info in infos:
                 #     if 'heading_turn_counts' in info:
                 #         heading_turns_list.append(info['heading_turn_counts'])
 
-                data = obs, actions, rewards, dones, bad_dones, exceed_time_limits, action_log_probs, values, rnn_states_actor, rnn_states_critic
+                data = obs, actions, rewards, dones, bad_dones, exceed_time_limits, action_log_probs, values, rnn_states_actor, rnn_states_critic, nav_pos_est, nav_pos_true
 
                 # insert data into buffer
                 self.insert(data)
@@ -98,6 +114,15 @@ class F16SimRunner(Runner):
                 train_infos["average_episode_rewards"] = self.buffer.rewards.sum() / ((self.buffer.masks[1:] == False).sum() 
                                                                                       + (self.buffer.bad_masks[1:] == False).sum())
                 logging.info("average episode rewards is {}".format(train_infos["average_episode_rewards"]))
+                
+                # 记录导航MSE统计
+                if self.nav_mse_stats:
+                    nav_mse_mean = np.mean(self.nav_mse_stats)
+                    nav_mse_std = np.std(self.nav_mse_stats)
+                    train_infos["nav_mse_mean"] = nav_mse_mean
+                    train_infos["nav_mse_std"] = nav_mse_std
+                    logging.info("Navigation MSE - Mean: {:.6f}, Std: {:.6f}".format(nav_mse_mean, nav_mse_std))
+                    self.nav_mse_stats.clear()  # 清空统计，准备下一个周期
 
                 # if len(heading_turns_list):
                 #     train_infos["average_heading_turns"] = np.mean(heading_turns_list)
@@ -134,9 +159,70 @@ class F16SimRunner(Runner):
         rnn_states_actor = np.array(np.split(_t2n(rnn_states_actor), self.n_rollout_threads))
         rnn_states_critic = np.array(np.split(_t2n(rnn_states_critic), self.n_rollout_threads))
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
+    
+    def _compute_nav_mse_and_reward_shaping(self, infos, rewards):
+        """计算导航MSE并进行奖励塑形
+        
+        Args:
+            infos: 环境返回的信息字典列表
+            rewards: 原始奖励数组 (n_rollout_threads, num_agents, 1)
+            
+        Returns:
+            tuple: (nav_pos_est, nav_pos_true, nav_mse_mean)
+        """
+        n_envs = len(infos)
+        nav_pos_est = np.zeros((n_envs, self.num_agents, 3), dtype=np.float32)
+        nav_pos_true = np.zeros((n_envs, self.num_agents, 3), dtype=np.float32)
+        nav_mse_mean = 0.0
+        
+        if self.use_nav_loss:
+            nav_mse_list = []
+            
+            for i, info in enumerate(infos):
+                 # 检查info的类型和结构
+                 if isinstance(info, dict) and 'nav' in info:
+                     nav_info = info['nav']
+                     # 提取导航估计和真值 (单位：米)
+                     pos_est = nav_info.get('pos_m_est', np.zeros(3))
+                     pos_true = nav_info.get('pos_m_true', np.zeros(3))
+                 else:
+                     # 如果info不是字典或没有nav字段，使用默认值
+                     pos_est = np.zeros(3)
+                     pos_true = np.zeros(3)
+                 
+                 # 确保形状正确 (num_agents, 3)
+                 if pos_est.ndim == 1:
+                     pos_est = pos_est.reshape(1, -1)
+                 if pos_true.ndim == 1:
+                     pos_true = pos_true.reshape(1, -1)
+                 
+                 nav_pos_est[i] = pos_est[:self.num_agents]
+                 nav_pos_true[i] = pos_true[:self.num_agents]
+                 
+                 # 计算MSE (逐分量平方误差的均值)
+                 mse = np.mean((pos_est - pos_true) ** 2)
+                 nav_mse_list.append(mse)
+                 
+                 # 奖励塑形：减去MSE损失
+                 rewards[i] -= self.nav_loss_coef * mse
+            
+            if nav_mse_list:
+                nav_mse_mean = np.mean(nav_mse_list)
+                self.nav_mse_stats.extend(nav_mse_list)
+        
+        return nav_pos_est, nav_pos_true, nav_mse_mean
 
     def insert(self, data: List[np.ndarray]):
-        obs, actions, rewards, dones, bad_dones, exceed_time_limits, action_log_probs, values, rnn_states_actor, rnn_states_critic = data
+        """将数据插入buffer，支持导航信息存储
+        
+        Args:
+            data: 包含obs, actions, rewards等的数据列表，可能包含导航数据
+        """
+        if len(data) == 10:  # 兼容旧格式
+            obs, actions, rewards, dones, bad_dones, exceed_time_limits, action_log_probs, values, rnn_states_actor, rnn_states_critic = data
+            nav_pos_est, nav_pos_true = None, None
+        else:  # 新格式包含导航数据
+            obs, actions, rewards, dones, bad_dones, exceed_time_limits, action_log_probs, values, rnn_states_actor, rnn_states_critic, nav_pos_est, nav_pos_true = data
 
         dones_env = np.any(dones.squeeze(axis=-1), axis=-1)
         bad_dones_env = np.any(bad_dones.squeeze(axis=-1), axis=-1)
@@ -151,7 +237,7 @@ class F16SimRunner(Runner):
         bad_masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
         bad_masks[bad_dones_env == True] = np.zeros(((bad_dones_env == True).sum(), self.num_agents, 1), dtype=np.float32)
 
-        self.buffer.insert(obs, actions, rewards, masks, action_log_probs, values, rnn_states_actor, rnn_states_critic, bad_masks)
+        self.buffer.insert(obs, actions, rewards, masks, action_log_probs, values, rnn_states_actor, rnn_states_critic, bad_masks, nav_pos_est=nav_pos_est, nav_pos_true=nav_pos_true)
 
     @torch.no_grad()
     def eval(self, total_num_steps):

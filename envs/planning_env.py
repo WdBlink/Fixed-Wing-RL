@@ -32,6 +32,11 @@ class Args:
 class PlanningEnv(BaseEnv):
     """
     PlanningEnv is a fly-planning env for single agent to do tracking task.
+    文件作者: wdblink
+
+    类说明:
+        - 高层策略输出目标姿态与速度命令，并在此基础上调用低层控制器（PPO 或 PID）进行姿态/油门控制。
+        - 扩展支持: 第4维高层动作作为 EKF 融合门控，范围[0,1]，用于自适应抑制不可靠的 gps2 测量。
     """
     def __init__(self, num_envs=1, config='tracking', model='F16', random_seed=None, device="cuda:0", controller_type='ppo'):
         super().__init__(num_envs, config, model, random_seed, device)
@@ -151,6 +156,7 @@ class PlanningEnv(BaseEnv):
         return obs
     
     def step(self, action, render=False, count=0):
+        # 说明：高层动作维度扩展为4，第4维为 gps2 融合门控 gate∈[0,1]
         self.reset()
         action = torch.clamp(action, -1, 1)
         # set target
@@ -159,6 +165,8 @@ class PlanningEnv(BaseEnv):
         target_pitch = pitch + action[:, 0] * 0.3
         target_heading = yaw + action[:, 1] * 0.3
         target_vt = vt + action[:, 2] * 30
+        # EKF 融合门控（[0,1]），值越小越不信任测量
+        fuse_gate = (action[:, 3].reshape(-1, 1) + 1.0) * 0.5
         for i in range(50):
             # 在每个内部仿真步开始前清理 gps2 测量缓存，确保同一步内 obs 与 info 复用同一份采样
             if getattr(self, 'gps2_enabled', False):
@@ -192,6 +200,12 @@ class PlanningEnv(BaseEnv):
             # 推送 gps2 光学定位缓冲样本（延迟观测使用）
             if getattr(self, 'gps2_enabled', False):
                 self._gps2_push_sample()
+            # 导航预测（纯惯导积分）
+            self._nav_predict()
+            # EKF 更新：基于当前步的光学定位测量与门控
+            if getattr(self, 'gps2_enabled', False):
+                meas = self.get_gps2_optical()
+                self._nav_update(meas_enu_m=meas['enu_m'], meas_std_m=meas['noise_std_m'], fuse_gate=fuse_gate)
             done = self.is_done.bool()
             bad_done = self.bad_done.bool()
             exceed_time_limit = self.exceed_time_limit.bool()
